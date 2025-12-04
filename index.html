@@ -1,0 +1,193 @@
+<script>
+let files = [];
+let results = [];
+
+document.getElementById("files").addEventListener("change", e => {
+    files = Array.from(e.target.files);
+    document.getElementById("fileInfo").textContent = files.length + " files selected";
+    document.getElementById("processBtn").disabled = files.length === 0;
+});
+
+async function processAllFiles() {
+    results = [];
+    document.getElementById("downloadBtn").style.display = "none";
+
+    for (let i = 0; i < files.length; i++) {
+        updateProgress(i + 1, files.length);
+
+        const data = await parseCSV(files[i]);
+        const metrics = extractMetrics(files[i].name, data);
+        results.push(metrics);
+    }
+
+    showResults();
+    document.getElementById("downloadBtn").style.display = "inline-block";
+}
+
+function updateProgress(count, total) {
+    const pct = Math.round((count / total) * 100);
+    document.getElementById("progress").innerHTML =
+        `<div class="progress"><div class="progress-bar" style="width:${pct}%">${pct}%</div></div>`;
+}
+
+function parseCSV(file) {
+    return new Promise(resolve => {
+        Papa.parse(file, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
+            complete: r => resolve(r.data)
+        });
+    });
+}
+
+// ----------- EXTRACT METRICS -----------
+function extractMetrics(filename, data) {
+
+    const id = filename.replace(/\.(csv|txt)$/i, "").replace("_period_analysis_summary", "");
+    const name = id;
+
+    // Remove Duration column from each row
+    data = data.map(row => {
+        delete row["Duration"];
+        delete row["duration"];
+        return row;
+    });
+
+    // FIXED ROWS
+    const baseline = data[0];       // row 2
+    const conditioningRows = data.slice(1, 6); // rows 3–7
+    const pgq = data[6];            // row 8
+
+    // Helper to average any metric column across rows 3–7
+    function meanMetric(rows, key) {
+        const col = Object.keys(rows[0]).find(k => k.toLowerCase().includes(key));
+        if (!col) return "N/A";
+
+        const values = rows.map(r => Number(r[col]) || 0);
+        return (values.reduce((a, b) => a + b, 0) / values.length).toFixed(6);
+    }
+
+    // Helper for single-row metrics
+    function singleMetric(row, key) {
+        if (!row) return "N/A";
+        const col = Object.keys(row).find(k => k.toLowerCase().includes(key));
+        return row[col] ?? "N/A";
+    }
+
+    return {
+        id,
+        name,
+
+        baseline: {
+            meanSCL: singleMetric(baseline, "mean scl"),
+            meanSCR: singleMetric(baseline, "mean scr"),
+            scrFreq: singleMetric(baseline, "scr freq"),
+            totalSCR: singleMetric(baseline, "total scr"),
+            sclSlope: singleMetric(baseline, "scl slope"),
+            nsSCL: singleMetric(baseline, "ns-scl"),
+            sclStd: singleMetric(baseline, "scl std"),
+            scrStd: singleMetric(baseline, "scr std")
+        },
+
+        conditioning: {
+            meanSCL: meanMetric(conditioningRows, "mean scl"),
+            meanSCR: meanMetric(conditioningRows, "mean scr"),
+            scrFreq: meanMetric(conditioningRows, "scr freq"),
+            totalSCR: meanMetric(conditioningRows, "total scr"),
+            sclSlope: meanMetric(conditioningRows, "scl slope"),
+            nsSCL: meanMetric(conditioningRows, "ns-scl"),
+            sclStd: meanMetric(conditioningRows, "scl std"),
+            scrStd: meanMetric(conditioningRows, "scr std")
+        },
+
+        pgq: {
+            meanSCL: singleMetric(pgq, "mean scl"),
+            meanSCR: singleMetric(pgq, "mean scr"),
+            scrFreq: singleMetric(pgq, "scr freq"),
+            totalSCR: singleMetric(pgq, "total scr"),
+            sclSlope: singleMetric(pgq, "scl slope"),
+            nsSCL: singleMetric(pgq, "ns-scl"),
+            sclStd: singleMetric(pgq, "scl std"),
+            scrStd: singleMetric(pgq, "scr std")
+        }
+    };
+}
+
+// ---------- TABLE PREVIEW ----------
+function showResults() {
+    let html = `
+    <h3>Preview (first 10 participants)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th><th>NAME</th>
+                <th>Mean SCL BASELINE</th><th>Mean SCL COND</th><th>Mean SCL PGQ</th>
+                <th>Mean SCR BASELINE</th><th>Mean SCR COND</th><th>Mean SCR PGQ</th>
+                <th>SCR Freq BASELINE</th><th>SCR Freq COND</th><th>SCR Freq PGQ</th>
+                <th>Total SCR BASELINE</th><th>Total SCR COND</th><th>Total SCR PGQ</th>
+                <th>SCL Slope BASELINE</th><th>SCL Slope COND</th><th>SCL Slope PGQ</th>
+                <th>NS-SCL BASELINE</th><th>NS-SCL COND</th><th>NS-SCL PGQ</th>
+                <th>SCL Std BASELINE</th><th>SCL Std COND</th><th>SCL Std PGQ</th>
+                <th>SCR Std BASELINE</th><th>SCR Std COND</th><th>SCR Std PGQ</th>
+            </tr>
+        </thead><tbody>
+    `;
+
+    results.slice(0, 10).forEach(r => {
+        html += `
+        <tr>
+            <td>${r.id}</td><td>${r.name}</td>
+
+            <td>${r.baseline.meanSCL}</td><td>${r.conditioning.meanSCL}</td><td>${r.pgq.meanSCL}</td>
+            <td>${r.baseline.meanSCR}</td><td>${r.conditioning.meanSCR}</td><td>${r.pgq.meanSCR}</td>
+            <td>${r.baseline.scrFreq}</td><td>${r.conditioning.scrFreq}</td><td>${r.pgq.scrFreq}</td>
+            <td>${r.baseline.totalSCR}</td><td>${r.conditioning.totalSCR}</td><td>${r.pgq.totalSCR}</td>
+            <td>${r.baseline.sclSlope}</td><td>${r.conditioning.sclSlope}</td><td>${r.pgq.sclSlope}</td>
+            <td>${r.baseline.nsSCL}</td><td>${r.conditioning.nsSCL}</td><td>${r.pgq.nsSCL}</td>
+            <td>${r.baseline.sclStd}</td><td>${r.conditioning.sclStd}</td><td>${r.pgq.sclStd}</td>
+            <td>${r.baseline.scrStd}</td><td>${r.conditioning.scrStd}</td><td>${r.pgq.scrStd}</td>
+        </tr>`;
+    });
+
+    html += "</tbody></table>";
+
+    document.getElementById("results").innerHTML = html;
+}
+
+
+// ---------- EXPORT MASTER SHEET ----------
+function downloadCSV() {
+
+    const header = [
+        "id","name",
+        "Mean SCL BASELINE","Mean SCL COND","Mean SCL PGQ",
+        "Mean SCR BASELINE","Mean SCR COND","Mean SCR PGQ",
+        "SCR Freq BASELINE","SCR Freq COND","SCR Freq PGQ",
+        "Total SCR BASELINE","Total SCR COND","Total SCR PGQ",
+        "SCL Slope BASELINE","SCL Slope COND","SCL Slope PGQ",
+        "NS-SCL BASELINE","NS-SCL COND","NS-SCL PGQ",
+        "SCL Std BASELINE","SCL Std COND","SCL Std PGQ",
+        "SCR Std BASELINE","SCR Std COND","SCR Std PGQ"
+    ];
+
+    const rows = results.map(r => [
+        r.id, r.name,
+        r.baseline.meanSCL, r.conditioning.meanSCL, r.pgq.meanSCL,
+        r.baseline.meanSCR, r.conditioning.meanSCR, r.pgq.meanSCR,
+        r.baseline.scrFreq, r.conditioning.scrFreq, r.pgq.scrFreq,
+        r.baseline.totalSCR, r.conditioning.totalSCR, r.pgq.totalSCR,
+        r.baseline.sclSlope, r.conditioning.sclSlope, r.pgq.sclSlope,
+        r.baseline.nsSCL, r.conditioning.nsSCL, r.pgq.nsSCL,
+        r.baseline.sclStd, r.conditioning.sclStd, r.pgq.sclStd,
+        r.baseline.scrStd, r.conditioning.scrStd, r.pgq.scrStd
+    ]);
+
+    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    link.download = "EDA_MASTER_SHEET.csv";
+    link.click();
+}
+</script>
