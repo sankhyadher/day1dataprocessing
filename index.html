@@ -8,6 +8,7 @@ document.getElementById("files").addEventListener("change", e => {
     document.getElementById("processBtn").disabled = files.length === 0;
 });
 
+
 async function processAllFiles() {
     results = [];
     document.getElementById("downloadBtn").style.display = "none";
@@ -24,13 +25,15 @@ async function processAllFiles() {
     document.getElementById("downloadBtn").style.display = "inline-block";
 }
 
+
 function updateProgress(count, total) {
     const pct = Math.round((count / total) * 100);
     document.getElementById("progress").innerHTML =
         `<div class="progress"><div class="progress-bar" style="width:${pct}%">${pct}%</div></div>`;
 }
 
-// CSV parsing
+
+// ------- CSV PARSER -------
 function parseCSV(file) {
     return new Promise(resolve => {
         Papa.parse(file, {
@@ -42,105 +45,93 @@ function parseCSV(file) {
     });
 }
 
-// ------------------------------------------
-//      MAIN EXTRACTION LOGIC (FIXED)
-// ------------------------------------------
+
+// ----------- MAIN EXTRACTION LOGIC -----------
 function extractMetrics(filename, data) {
 
     const id = filename.replace(/\.(csv|txt)$/i, "").replace("_period_analysis_summary", "");
     const name = id;
 
-    // Remove Duration column
-    data = data.map(row => {
-        delete row["Duration"];
-        delete row["duration"];
-        return row;
-    });
+    // FIXED ROW POSITIONS (LAST ROW REMOVED)
+    const baseline = data[0];   // Baseline
+    const pgq      = data[7];   // PGQ (row 7)
+    
+    // CONDITIONING = average of: C1 (2), C3 (4), C4 (5), C5 (6)
+    const conditioningRows = [data[2], data[4], data[5], data[6]];
 
-    // FIXED ROW POSITIONS (matching your screenshot)
-    const baseline = data[0];            // Baseline
-    const conditioningRows = data.slice(2, 7); // C1–C5 = rows 4–8
-    const pgq = data[7];                 // PGQ = row 9
+    // helper to average a numeric column across rows
+    function avgMetric(rows, key) {
+        const values = rows
+            .map(r => {
+                if (!r) return null;
+                const col = Object.keys(r).find(k => k.toLowerCase().includes(key.toLowerCase()));
+                return typeof r[col] === "number" ? r[col] : null;
+            })
+            .filter(v => v !== null);
 
-    // Helper to find column key
-    function findColumn(row, key) {
-        return Object.keys(row).find(k => k.toLowerCase().includes(key.toLowerCase()));
+        if (values.length === 0) return "N/A";
+        return (values.reduce((a, b) => a + b, 0) / values.length).toFixed(6);
     }
 
-    // Single-row metric extractor
-    function singleMetric(row, key) {
-        if (!row) return "N/A";
-        const col = findColumn(row, key);
-        return col ? row[col] : "N/A";
-    }
+    const conditioning = {
+        meanSCL: avgMetric(conditioningRows, "mean scl"),
+        meanSCR: avgMetric(conditioningRows, "mean scr"),
+        scrFreq: avgMetric(conditioningRows, "scr freq"),
+        totalSCR: avgMetric(conditioningRows, "total scr"),
+        sclSlope: avgMetric(conditioningRows, "scl slope"),
+        nsSCL: avgMetric(conditioningRows, "ns-scl"),
+        sclStd: avgMetric(conditioningRows, "scl std"),
+        scrStd: avgMetric(conditioningRows, "scr std")
+    };
 
-    // Compute average of conditioning rows
-    function meanMetric(rows, key) {
-        const col = findColumn(rows[0], key);
-        if (!col) return "N/A";
-
-        const values = rows.map(r => Number(r[col]) || 0);
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        return mean.toFixed(6);
-    }
-
+    // Build output row object
     return {
         id,
         name,
 
         baseline: {
-            meanSCL: singleMetric(baseline, "mean scl"),
-            meanSCR: singleMetric(baseline, "mean scr"),
-            scrFreq: singleMetric(baseline, "scr freq"),
-            totalSCR: singleMetric(baseline, "total scr"),
-            sclSlope: singleMetric(baseline, "scl slope"),
-            nsSCL: singleMetric(baseline, "ns-scl"),
-            sclStd: singleMetric(baseline, "scl std"),
-            scrStd: singleMetric(baseline, "scr std")
+            meanSCL: baseline["Mean SCL"],
+            meanSCR: baseline["Mean SCR"],
+            scrFreq: baseline["SCR Frequen"],
+            totalSCR: baseline["Total SCRs"],
+            sclSlope: baseline["SCL Slope"],
+            nsSCL: baseline["NS-SCL"],
+            sclStd: baseline["SCL Std Dev"],
+            scrStd: baseline["SCR Std Dev"]
         },
 
-        conditioning: {
-            meanSCL: meanMetric(conditioningRows, "mean scl"),
-            meanSCR: meanMetric(conditioningRows, "mean scr"),
-            scrFreq: meanMetric(conditioningRows, "scr freq"),
-            totalSCR: meanMetric(conditioningRows, "total scr"),
-            sclSlope: meanMetric(conditioningRows, "scl slope"),
-            nsSCL: meanMetric(conditioningRows, "ns-scl"),
-            sclStd: meanMetric(conditioningRows, "scl std"),
-            scrStd: meanMetric(conditioningRows, "scr std")
-        },
+        conditioning: conditioning,
 
         pgq: {
-            meanSCL: singleMetric(pgq, "mean scl"),
-            meanSCR: singleMetric(pgq, "mean scr"),
-            scrFreq: singleMetric(pgq, "scr freq"),
-            totalSCR: singleMetric(pgq, "total scr"),
-            sclSlope: singleMetric(pgq, "scl slope"),
-            nsSCL: singleMetric(pgq, "ns-scl"),
-            sclStd: singleMetric(pgq, "scl std"),
-            scrStd: singleMetric(pgq, "scr std")
+            meanSCL: pgq["Mean SCL"],
+            meanSCR: pgq["Mean SCR"],
+            scrFreq: pgq["SCR Frequen"],
+            totalSCR: pgq["Total SCRs"],
+            sclSlope: pgq["SCL Slope"],
+            nsSCL: pgq["NS-SCL"],
+            sclStd: pgq["SCL Std Dev"],
+            scrStd: pgq["SCR Std Dev"]
         }
     };
 }
 
-// ------------------------------------------
-//           TABLE PREVIEW OUTPUT
-// ------------------------------------------
+
+// --------- PREVIEW TABLE ---------
 function showResults() {
     let html = `
-    <h3>Preview</h3>
+    <h3>Preview (first 10 rows)</h3>
     <table>
         <thead>
             <tr>
                 <th>ID</th><th>NAME</th>
-                <th>SCL Base</th><th>SCL Cond</th><th>SCL PGQ</th>
-                <th>SCR Base</th><th>SCR Cond</th><th>SCR PGQ</th>
-                <th>Freq Base</th><th>Freq Cond</th><th>Freq PGQ</th>
-                <th>Total Base</th><th>Total Cond</th><th>Total PGQ</th>
-                <th>Slope Base</th><th>Slope Cond</th><th>Slope PGQ</th>
-                <th>NS Base</th><th>NS Cond</th><th>NS PGQ</th>
-                <th>SCL Std Base</th><th>SCL Std Cond</th><th>SCL Std PGQ</th>
-                <th>SCR Std Base</th><th>SCR Std Cond</th><th>SCR Std PGQ</th>
+                <th>Mean SCL BASELINE</th><th>Mean SCL CONDITIONING</th><th>Mean SCL PGQ</th>
+                <th>Mean SCR BASELINE</th><th>Mean SCR CONDITIONING</th><th>Mean SCR PGQ</th>
+                <th>SCR Freq BASELINE</th><th>SCR Freq CONDITIONING</th><th>SCR Freq PGQ</th>
+                <th>Total SCR BASELINE</th><th>Total SCR CONDITIONING</th><th>Total SCR PGQ</th>
+                <th>SCL Slope BASELINE</th><th>SCL Slope CONDITIONING</th><th>SCL Slope PGQ</th>
+                <th>NS-SCL BASELINE</th><th>NS-SCL CONDITIONING</th><th>NS-SCL PGQ</th>
+                <th>SCL Std BASELINE</th><th>SCL Std CONDITIONING</th><th>SCL Std PGQ</th>
+                <th>SCR Std BASELINE</th><th>SCR Std CONDITIONING</th><th>SCR Std PGQ</th>
             </tr>
         </thead><tbody>
     `;
@@ -165,20 +156,20 @@ function showResults() {
     document.getElementById("results").innerHTML = html;
 }
 
-// ------------------------------------------
-//           CSV DOWNLOAD
-// ------------------------------------------
+
+// ---------- CSV EXPORT ----------
 function downloadCSV() {
+
     const header = [
         "id","NAME",
-        "SCL Base","SCL Cond","SCL PGQ",
-        "SCR Base","SCR Cond","SCR PGQ",
-        "Freq Base","Freq Cond","Freq PGQ",
-        "Total Base","Total Cond","Total PGQ",
-        "Slope Base","Slope Cond","Slope PGQ",
-        "NS Base","NS Cond","NS PGQ",
-        "SCL Std Base","SCL Std Cond","SCL Std PGQ",
-        "SCR Std Base","SCR Std Cond","SCR Std PGQ"
+        "Mean SCL BASELINE","Mean SCL CONDITIONING","Mean SCL PGQ",
+        "Mean SCR BASELINE","Mean SCR CONDITIONING","Mean SCR PGQ",
+        "SCR Freq BASELINE","SCR Freq CONDITIONING","SCR Freq PGQ",
+        "Total SCR BASELINE","Total SCR CONDITIONING","Total SCR PGQ",
+        "SCL Slope BASELINE","SCL Slope CONDITIONING","SCL Slope PGQ",
+        "NS-SCL BASELINE","NS-SCL CONDITIONING","NS-SCL PGQ",
+        "SCL Std BASELINE","SCL Std CONDITIONING","SCL Std PGQ",
+        "SCR Std BASELINE","SCR Std CONDITIONING","SCR Std PGQ"
     ];
 
     const rows = results.map(r => [
