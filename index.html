@@ -1,209 +1,34 @@
-<script>
-let files = [];
-let results = [];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EDA Data Processor</title>
 
-document.getElementById("files").addEventListener("change", e => {
-    files = Array.from(e.target.files);
-    document.getElementById("fileInfo").textContent = files.length + " files selected";
-    document.getElementById("processBtn").disabled = files.length === 0;
-});
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+</head>
 
-async function processAllFiles() {
-    results = [];
-    document.getElementById("downloadBtn").style.display = "none";
+<body>
 
-    for (let i = 0; i < files.length; i++) {
+<div class="card">
+    <h1>EDA Data Processor</h1>
 
-        updateProgress(i + 1, files.length);
+    <div class="upload-zone" onclick="document.getElementById('files').click()">
+        <p style="font-size: 48px; margin:0;">📁</p>
+        <p><strong>Click to upload files</strong></p>
+        <p id="fileInfo" style="color: green; font-weight: bold;"></p>
+    </div>
 
-        const data = await parseCSV(files[i]);
-        const metrics = extractMetrics(files[i].name, data);
+    <input type="file" id="files" multiple accept=".csv" style="display:none;">
 
-        results.push(metrics);
-    }
+    <button id="processBtn" disabled>Process Files</button>
+    <button id="downloadBtn" class="success-btn" style="display:none;">Download Master Sheet</button>
 
-    showResults();
-    document.getElementById("downloadBtn").style.display = "inline-block";
-}
+    <div id="progress"></div>
+    <div id="results"></div>
+</div>
 
-function updateProgress(count, total) {
-    const pct = Math.round((count / total) * 100);
-    document.getElementById("progress").innerHTML =
-        `<div class="progress"><div class="progress-bar" style="width:${pct}%">${pct}%</div></div>`;
-}
-
-function parseCSV(file) {
-    return new Promise(resolve => {
-        Papa.parse(file, {
-            header: true,
-            dynamicTyping: true,
-            skipEmptyLines: true,
-            complete: r => resolve(r.data)
-        });
-    });
-}
-
-
-// --------------------------------------------------------
-//                METRIC EXTRACTION LOGIC
-// --------------------------------------------------------
-function extractMetrics(filename, data) {
-
-    const id = filename.replace(/\.(csv|txt)$/i, "").replace("_period_analysis_summary", "");
-    const name = id;
-
-    // REMOVE DURATION COLUMN
-    data = data.map(row => {
-        delete row["Duration"];
-        delete row["duration"];
-        return row;
-    });
-
-    // FIXED ROW POSITIONS BASED ON YOUR SCREENSHOT
-    const baseline = data[0];        // row 2
-    const conditioningRows = data.slice(2, 7); // rows 4–8 (C1 to C5)
-    const pgq = data[7];             // row 9
-
-    // Helper: get column by partial name
-    function findColumn(row, key) {
-        return Object.keys(row).find(k => k.toLowerCase().includes(key));
-    }
-
-    // Single-row metric
-    function singleMetric(row, key) {
-        if (!row) return "N/A";
-        const col = findColumn(row, key);
-        return col ? row[col] : "N/A";
-    }
-
-    // Mean across conditioning rows
-    function meanMetric(rows, key) {
-        const col = findColumn(rows[0], key);
-        if (!col) return "N/A";
-
-        let vals = rows.map(r => Number(r[col]) || 0);
-        return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(6);
-    }
-
-    // Build final object
-    return {
-        id,
-        name,
-
-        baseline: {
-            meanSCL: singleMetric(baseline, "mean scl"),
-            meanSCR: singleMetric(baseline, "mean scr"),
-            scrFreq: singleMetric(baseline, "scr freq"),
-            totalSCR: singleMetric(baseline, "total scr"),
-            sclSlope: singleMetric(baseline, "scl slope"),
-            nsSCL: singleMetric(baseline, "ns-scl"),
-            sclStd: singleMetric(baseline, "scl std"),
-            scrStd: singleMetric(baseline, "scr std")
-        },
-
-        conditioning: {
-            meanSCL: meanMetric(conditioningRows, "mean scl"),
-            meanSCR: meanMetric(conditioningRows, "mean scr"),
-            scrFreq: meanMetric(conditioningRows, "scr freq"),
-            totalSCR: meanMetric(conditioningRows, "total scr"),
-            sclSlope: meanMetric(conditioningRows, "scl slope"),
-            nsSCL: meanMetric(conditioningRows, "ns-scl"),
-            sclStd: meanMetric(conditioningRows, "scl std"),
-            scrStd: meanMetric(conditioningRows, "scr std")
-        },
-
-        pgq: {
-            meanSCL: singleMetric(pgq, "mean scl"),
-            meanSCR: singleMetric(pgq, "mean scr"),
-            scrFreq: singleMetric(pgq, "scr freq"),
-            totalSCR: singleMetric(pgq, "total scr"),
-            sclSlope: singleMetric(pgq, "scl slope"),
-            nsSCL: singleMetric(pgq, "ns-scl"),
-            sclStd: singleMetric(pgq, "scl std"),
-            scrStd: singleMetric(pgq, "scr std")
-        }
-    };
-}
-
-// --------------------------------------------------------
-//                     PREVIEW TABLE
-// --------------------------------------------------------
-function showResults() {
-
-    let html = `
-    <h3>Preview (first 10 rows)</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th><th>Name</th>
-                <th>Mean SCL Base</th><th>Mean SCL Cond</th><th>Mean SCL PGQ</th>
-                <th>Mean SCR Base</th><th>Mean SCR Cond</th><th>Mean SCR PGQ</th>
-                <th>SCR Freq Base</th><th>SCR Freq Cond</th><th>SCR Freq PGQ</th>
-                <th>Total SCR Base</th><th>Total SCR Cond</th><th>Total SCR PGQ</th>
-                <th>SCL Slope Base</th><th>SCL Slope Cond</th><th>SCL Slope PGQ</th>
-                <th>NS-SCL Base</th><th>NS-SCL Cond</th><th>NS-SCL PGQ</th>
-                <th>SCL Std Base</th><th>SCL Std Cond</th><th>SCL Std PGQ</th>
-                <th>SCR Std Base</th><th>SCR Std Cond</th><th>SCR Std PGQ</th>
-            </tr>
-        </thead>
-        <tbody>
-    `;
-
-    results.slice(0, 10).forEach(r => {
-        html += `
-        <tr>
-            <td>${r.id}</td><td>${r.name}</td>
-
-            <td>${r.baseline.meanSCL}</td><td>${r.conditioning.meanSCL}</td><td>${r.pgq.meanSCL}</td>
-            <td>${r.baseline.meanSCR}</td><td>${r.conditioning.meanSCR}</td><td>${r.pgq.meanSCR}</td>
-            <td>${r.baseline.scrFreq}</td><td>${r.conditioning.scrFreq}</td><td>${r.pgq.scrFreq}</td>
-            <td>${r.baseline.totalSCR}</td><td>${r.conditioning.totalSCR}</td><td>${r.pgq.totalSCR}</td>
-            <td>${r.baseline.sclSlope}</td><td>${r.conditioning.sclSlope}</td><td>${r.pgq.sclSlope}</td>
-            <td>${r.baseline.nsSCL}</td><td>${r.conditioning.nsSCL}</td><td>${r.pgq.nsSCL}</td>
-            <td>${r.baseline.sclStd}</td><td>${r.conditioning.sclStd}</td><td>${r.pgq.sclStd}</td>
-            <td>${r.baseline.scrStd}</td><td>${r.conditioning.scrStd}</td><td>${r.pgq.scrStd}</td>
-        </tr>`;
-    });
-
-    html += "</tbody></table>";
-
-    document.getElementById("results").innerHTML = html;
-}
-
-// --------------------------------------------------------
-//                     CSV EXPORT
-// --------------------------------------------------------
-function downloadCSV() {
-
-    const header = [
-        "id","name",
-        "Mean SCL Base","Mean SCL Cond","Mean SCL PGQ",
-        "Mean SCR Base","Mean SCR Cond","Mean SCR PGQ",
-        "SCR Freq Base","SCR Freq Cond","SCR Freq PGQ",
-        "Total SCR Base","Total SCR Cond","Total SCR PGQ",
-        "SCL Slope Base","SCL Slope Cond","SCL Slope PGQ",
-        "NS-SCL Base","NS-SCL Cond","NS-SCL PGQ",
-        "SCL Std Base","SCL Std Cond","SCL Std PGQ",
-        "SCR Std Base","SCR Std Cond","SCR Std PGQ"
-    ];
-
-    const rows = results.map(r => [
-        r.id, r.name,
-        r.baseline.meanSCL, r.conditioning.meanSCL, r.pgq.meanSCL,
-        r.baseline.meanSCR, r.conditioning.meanSCR, r.pgq.meanSCR,
-        r.baseline.scrFreq, r.conditioning.scrFreq, r.pgq.scrFreq,
-        r.baseline.totalSCR, r.conditioning.totalSCR, r.pgq.totalSCR,
-        r.baseline.sclSlope, r.conditioning.sclSlope, r.pgq.sclSlope,
-        r.baseline.nsSCL, r.conditioning.nsSCL, r.pgq.nsSCL,
-        r.baseline.sclStd, r.conditioning.sclStd, r.pgq.sclStd,
-        r.baseline.scrStd, r.conditioning.scrStd, r.pgq.scrStd
-    ]);
-
-    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
-
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    link.download = "EDA_MASTER_SHEET.csv";
-    link.click();
-}
-</script>
+<script src="script.js"></script>
+</body>
+</html>
