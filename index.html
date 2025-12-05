@@ -1,194 +1,353 @@
-<script>
-let files = [];
-let results = [];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EDA Data Processor</title>
 
-document.getElementById("files").addEventListener("change", e => {
-    files = Array.from(e.target.files);
-    document.getElementById("fileInfo").textContent = files.length + " files selected";
-    document.getElementById("processBtn").disabled = files.length === 0;
-});
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
 
-
-async function processAllFiles() {
-    results = [];
-    document.getElementById("downloadBtn").style.display = "none";
-
-    for (let i = 0; i < files.length; i++) {
-        updateProgress(i + 1, files.length);
-
-        const data = await parseCSV(files[i]);
-        const metrics = extractMetrics(files[i].name, data);
-        results.push(metrics);
-    }
-
-    showResults();
-    document.getElementById("downloadBtn").style.display = "inline-block";
-}
-
-
-function updateProgress(count, total) {
-    const pct = Math.round((count / total) * 100);
-    document.getElementById("progress").innerHTML =
-        `<div class="progress"><div class="progress-bar" style="width:${pct}%">${pct}%</div></div>`;
-}
-
-
-// ------- CSV PARSER -------
-function parseCSV(file) {
-    return new Promise(resolve => {
-        Papa.parse(file, {
-            header: true,
-            dynamicTyping: true,
-            skipEmptyLines: true,
-            complete: r => resolve(r.data)
-        });
-    });
-}
-
-
-// ----------- MAIN EXTRACTION LOGIC -----------
-function extractMetrics(filename, data) {
-
-    const id = filename.replace(/\.(csv|txt)$/i, "").replace("_period_analysis_summary", "");
-    const name = id;
-
-    // FIXED ROW POSITIONS (LAST ROW REMOVED)
-    const baseline = data[0];   // Baseline
-    const pgq      = data[7];   // PGQ (row 7)
-    
-    // CONDITIONING = average of: C1 (2), C3 (4), C4 (5), C5 (6)
-    const conditioningRows = [data[2], data[4], data[5], data[6]];
-
-    // helper to average a numeric column across rows
-    function avgMetric(rows, key) {
-        const values = rows
-            .map(r => {
-                if (!r) return null;
-                const col = Object.keys(r).find(k => k.toLowerCase().includes(key.toLowerCase()));
-                return typeof r[col] === "number" ? r[col] : null;
-            })
-            .filter(v => v !== null);
-
-        if (values.length === 0) return "N/A";
-        return (values.reduce((a, b) => a + b, 0) / values.length).toFixed(6);
-    }
-
-    const conditioning = {
-        meanSCL: avgMetric(conditioningRows, "mean scl"),
-        meanSCR: avgMetric(conditioningRows, "mean scr"),
-        scrFreq: avgMetric(conditioningRows, "scr freq"),
-        totalSCR: avgMetric(conditioningRows, "total scr"),
-        sclSlope: avgMetric(conditioningRows, "scl slope"),
-        nsSCL: avgMetric(conditioningRows, "ns-scl"),
-        sclStd: avgMetric(conditioningRows, "scl std"),
-        scrStd: avgMetric(conditioningRows, "scr std")
-    };
-
-    // Build output row object
-    return {
-        id,
-        name,
-
-        baseline: {
-            meanSCL: baseline["Mean SCL"],
-            meanSCR: baseline["Mean SCR"],
-            scrFreq: baseline["SCR Frequen"],
-            totalSCR: baseline["Total SCRs"],
-            sclSlope: baseline["SCL Slope"],
-            nsSCL: baseline["NS-SCL"],
-            sclStd: baseline["SCL Std Dev"],
-            scrStd: baseline["SCR Std Dev"]
-        },
-
-        conditioning: conditioning,
-
-        pgq: {
-            meanSCL: pgq["Mean SCL"],
-            meanSCR: pgq["Mean SCR"],
-            scrFreq: pgq["SCR Frequen"],
-            totalSCR: pgq["Total SCRs"],
-            sclSlope: pgq["SCL Slope"],
-            nsSCL: pgq["NS-SCL"],
-            sclStd: pgq["SCL Std Dev"],
-            scrStd: pgq["SCR Std Dev"]
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
         }
-    };
-}
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin-top: 0;
+        }
+        .upload-zone {
+            border: 2px dashed #ccc;
+            padding: 40px;
+            text-align: center;
+            background: #fafafa;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 22px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-top: 8px;
+        }
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+        .success-btn {
+            background: #10b981;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 4px 6px;
+            text-align: center;
+        }
+        th {
+            background: #f3f3f3;
+        }
+        .progress {
+            width: 100%;
+            height: 24px;
+            background: #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #4f46e5;
+            text-align: center;
+            color: white;
+            line-height: 24px;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>EDA Data Processor</h1>
 
+    <div class="upload-zone" id="uploadZone">
+        <p style="font-size: 48px; margin:0;">📁</p>
+        <p><strong>Click to upload files</strong></p>
+        <p id="fileInfo" style="color: green; font-weight: bold;"></p>
+    </div>
 
-// --------- PREVIEW TABLE ---------
-function showResults() {
-    let html = `
-    <h3>Preview (first 10 rows)</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th><th>NAME</th>
-                <th>Mean SCL BASELINE</th><th>Mean SCL CONDITIONING</th><th>Mean SCL PGQ</th>
-                <th>Mean SCR BASELINE</th><th>Mean SCR CONDITIONING</th><th>Mean SCR PGQ</th>
-                <th>SCR Freq BASELINE</th><th>SCR Freq CONDITIONING</th><th>SCR Freq PGQ</th>
-                <th>Total SCR BASELINE</th><th>Total SCR CONDITIONING</th><th>Total SCR PGQ</th>
-                <th>SCL Slope BASELINE</th><th>SCL Slope CONDITIONING</th><th>SCL Slope PGQ</th>
-                <th>NS-SCL BASELINE</th><th>NS-SCL CONDITIONING</th><th>NS-SCL PGQ</th>
-                <th>SCL Std BASELINE</th><th>SCL Std CONDITIONING</th><th>SCL Std PGQ</th>
-                <th>SCR Std BASELINE</th><th>SCR Std CONDITIONING</th><th>SCR Std PGQ</th>
-            </tr>
-        </thead><tbody>
-    `;
+    <input type="file" id="files" multiple accept=".csv" style="display:none;" />
 
-    results.slice(0, 10).forEach(r => {
-        html += `
-        <tr>
-            <td>${r.id}</td><td>${r.name}</td>
+    <button id="processBtn" disabled>Process Files</button>
+    <button id="downloadBtn" class="success-btn" style="display:none;">Download Master Sheet</button>
 
-            <td>${r.baseline.meanSCL}</td><td>${r.conditioning.meanSCL}</td><td>${r.pgq.meanSCL}</td>
-            <td>${r.baseline.meanSCR}</td><td>${r.conditioning.meanSCR}</td><td>${r.pgq.meanSCR}</td>
-            <td>${r.baseline.scrFreq}</td><td>${r.conditioning.scrFreq}</td><td>${r.pgq.scrFreq}</td>
-            <td>${r.baseline.totalSCR}</td><td>${r.conditioning.totalSCR}</td><td>${r.pgq.totalSCR}</td>
-            <td>${r.baseline.sclSlope}</td><td>${r.conditioning.sclSlope}</td><td>${r.pgq.sclSlope}</td>
-            <td>${r.baseline.nsSCL}</td><td>${r.conditioning.nsSCL}</td><td>${r.pgq.nsSCL}</td>
-            <td>${r.baseline.sclStd}</td><td>${r.conditioning.sclStd}</td><td>${r.pgq.sclStd}</td>
-            <td>${r.baseline.scrStd}</td><td>${r.conditioning.scrStd}</td><td>${r.pgq.scrStd}</td>
-        </tr>`;
+    <div id="progress"></div>
+    <div id="results"></div>
+</div>
+
+<script>
+    // ---------------- STATE ----------------
+    var files = [];
+    var results = [];
+
+    // ------------- EVENT SETUP -------------
+    document.addEventListener("DOMContentLoaded", function () {
+        var fileInput   = document.getElementById("files");
+        var uploadZone  = document.getElementById("uploadZone");
+        var processBtn  = document.getElementById("processBtn");
+        var downloadBtn = document.getElementById("downloadBtn");
+
+        uploadZone.onclick = function () {
+            fileInput.click();
+        };
+
+        fileInput.addEventListener("change", function (e) {
+            files = Array.prototype.slice.call(e.target.files || []);
+            document.getElementById("fileInfo").textContent =
+                files.length > 0 ? (files.length + " files selected") : "";
+            processBtn.disabled = files.length === 0;
+        });
+
+        processBtn.addEventListener("click", processAllFiles);
+        downloadBtn.addEventListener("click", downloadCSV);
     });
 
-    html += "</tbody></table>";
-    document.getElementById("results").innerHTML = html;
-}
+    // ------------ CSV PARSING --------------
+    function parseCSV(file) {
+        return new Promise(function (resolve) {
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function (result) {
+                    resolve(result.data);
+                }
+            });
+        });
+    }
 
+    // ------------ PROGRESS BAR -------------
+    function updateProgress(current, total) {
+        var pct = Math.round((current / total) * 100);
+        var html = '<div class="progress">' +
+                   '<div class="progress-bar" style="width:' + pct + '%">' +
+                    pct + '% (' + current + '/' + total + ')' +
+                   '</div></div>';
+        document.getElementById("progress").innerHTML = html;
+    }
 
-// ---------- CSV EXPORT ----------
-function downloadCSV() {
+    // ------------- MAIN PROCESS ------------
+    async function processAllFiles() {
+        results = [];
+        document.getElementById("downloadBtn").style.display = "none";
+        document.getElementById("results").innerHTML = "";
+        document.getElementById("progress").innerHTML = "";
 
-    const header = [
-        "id","NAME",
-        "Mean SCL BASELINE","Mean SCL CONDITIONING","Mean SCL PGQ",
-        "Mean SCR BASELINE","Mean SCR CONDITIONING","Mean SCR PGQ",
-        "SCR Freq BASELINE","SCR Freq CONDITIONING","SCR Freq PGQ",
-        "Total SCR BASELINE","Total SCR CONDITIONING","Total SCR PGQ",
-        "SCL Slope BASELINE","SCL Slope CONDITIONING","SCL Slope PGQ",
-        "NS-SCL BASELINE","NS-SCL CONDITIONING","NS-SCL PGQ",
-        "SCL Std BASELINE","SCL Std CONDITIONING","SCL Std PGQ",
-        "SCR Std BASELINE","SCR Std CONDITIONING","SCR Std PGQ"
-    ];
+        if (files.length === 0) return;
 
-    const rows = results.map(r => [
-        r.id, r.name,
-        r.baseline.meanSCL, r.conditioning.meanSCL, r.pgq.meanSCL,
-        r.baseline.meanSCR, r.conditioning.meanSCR, r.pgq.meanSCR,
-        r.baseline.scrFreq, r.conditioning.scrFreq, r.pgq.scrFreq,
-        r.baseline.totalSCR, r.conditioning.totalSCR, r.pgq.totalSCR,
-        r.baseline.sclSlope, r.conditioning.sclSlope, r.pgq.sclSlope,
-        r.baseline.nsSCL, r.conditioning.nsSCL, r.pgq.nsSCL,
-        r.baseline.sclStd, r.conditioning.sclStd, r.pgq.sclStd,
-        r.baseline.scrStd, r.conditioning.scrStd, r.pgq.scrStd
-    ]);
+        for (var i = 0; i < files.length; i++) {
+            updateProgress(i + 1, files.length);
+            var data = await parseCSV(files[i]);
+            var metrics = extractMetrics(files[i].name, data);
+            results.push(metrics);
+        }
 
-    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+        document.getElementById("progress").innerHTML = "";
+        showResults();
+        document.getElementById("downloadBtn").style.display = "inline-block";
+    }
 
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    link.download = "EDA_MASTER_SHEET.csv";
-    link.click();
-}
+    // -------- METRIC EXTRACTION ------------
+    function extractMetrics(filename, data) {
+        var id = filename.replace(/\.(csv|txt)$/i, "")
+                         .replace("_period_analysis_summary", "");
+        var name = id;
+
+        // Remove Duration column if present
+        for (var i = 0; i < data.length; i++) {
+            if (!data[i]) continue;
+            delete data[i]["Duration"];
+            delete data[i]["duration"];
+        }
+
+        // Expect structure:
+        // data[0] = Baseline
+        // data[1] = Question (ignore)
+        // data[2..6] = C1..C5 (conditioning)
+        // data[7] = PGQ
+        if (!data || data.length < 8) {
+            return { id: id, name: name, baseline: {}, conditioning: {}, pgq: {} };
+        }
+
+        var baseline         = data[0];
+        var conditioningRows = data.slice(2, 7);
+        var pgq              = data[7];
+
+        function findColumn(row, key) {
+            if (!row) return null;
+            key = key.toLowerCase();
+            var cols = Object.keys(row);
+            for (var i = 0; i < cols.length; i++) {
+                if (cols[i].toLowerCase().indexOf(key) !== -1) return cols[i];
+            }
+            return null;
+        }
+
+        function singleMetric(row, key) {
+            if (!row) return "N/A";
+            var col = findColumn(row, key);
+            return col ? row[col] : "N/A";
+        }
+
+        function meanMetric(rows, key) {
+            if (!rows || rows.length === 0) return "N/A";
+            var col = findColumn(rows[0], key);
+            if (!col) return "N/A";
+            var sum = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var v = Number(rows[i][col]);
+                if (!isFinite(v)) v = 0;
+                sum += v;
+            }
+            var mean = sum / rows.length;
+            return mean.toFixed(6);
+        }
+
+        return {
+            id: id,
+            name: name,
+            baseline: {
+                meanSCL: singleMetric(baseline, "mean scl"),
+                meanSCR: singleMetric(baseline, "mean scr"),
+                scrFreq: singleMetric(baseline, "scr freq"),
+                totalSCR: singleMetric(baseline, "total scr"),
+                sclSlope: singleMetric(baseline, "scl slope"),
+                nsSCL:   singleMetric(baseline, "ns-scl"),
+                sclStd:  singleMetric(baseline, "scl std"),
+                scrStd:  singleMetric(baseline, "scr std")
+            },
+            conditioning: {
+                meanSCL: meanMetric(conditioningRows, "mean scl"),
+                meanSCR: meanMetric(conditioningRows, "mean scr"),
+                scrFreq: meanMetric(conditioningRows, "scr freq"),
+                totalSCR: meanMetric(conditioningRows, "total scr"),
+                sclSlope: meanMetric(conditioningRows, "scl slope"),
+                nsSCL:   meanMetric(conditioningRows, "ns-scl"),
+                sclStd:  meanMetric(conditioningRows, "scl std"),
+                scrStd:  meanMetric(conditioningRows, "scr std")
+            },
+            pgq: {
+                meanSCL: singleMetric(pgq, "mean scl"),
+                meanSCR: singleMetric(pgq, "mean scr"),
+                scrFreq: singleMetric(pgq, "scr freq"),
+                totalSCR: singleMetric(pgq, "total scr"),
+                sclSlope: singleMetric(pgq, "scl slope"),
+                nsSCL:   singleMetric(pgq, "ns-scl"),
+                sclStd:  singleMetric(pgq, "scl std"),
+                scrStd:  singleMetric(pgq, "scr std")
+            }
+        };
+    }
+
+    // -------------- PREVIEW TABLE ----------
+    function showResults() {
+        var container = document.getElementById("results");
+        if (!results || results.length === 0) {
+            container.innerHTML = "";
+            return;
+        }
+
+        var html = "<h3>Preview (first 10 participants)</h3>";
+        html += "<table><thead><tr>";
+        html += "<th>ID</th><th>NAME</th>";
+        html += "<th>Mean SCL BASE</th><th>Mean SCL COND</th><th>Mean SCL PGQ</th>";
+        html += "<th>Mean SCR BASE</th><th>Mean SCR COND</th><th>Mean SCR PGQ</th>";
+        html += "<th>SCR Freq BASE</th><th>SCR Freq COND</th><th>SCR Freq PGQ</th>";
+        html += "<th>Total SCR BASE</th><th>Total SCR COND</th><th>Total SCR PGQ</th>";
+        html += "<th>SCL Slope BASE</th><th>SCL Slope COND</th><th>SCL Slope PGQ</th>";
+        html += "<th>NS-SCL BASE</th><th>NS-SCL COND</th><th>NS-SCL PGQ</th>";
+        html += "<th>SCL Std BASE</th><th>SCL Std COND</th><th>SCL Std PGQ</th>";
+        html += "<th>SCR Std BASE</th><th>SCR Std COND</th><th>SCR Std PGQ</th>";
+        html += "</tr></thead><tbody>";
+
+        var max = Math.min(results.length, 10);
+        for (var i = 0; i < max; i++) {
+            var r = results[i];
+            html += "<tr>";
+            html += "<td>" + r.id + "</td><td>" + r.name + "</td>";
+            html += "<td>" + r.baseline.meanSCL + "</td><td>" + r.conditioning.meanSCL + "</td><td>" + r.pgq.meanSCL + "</td>";
+            html += "<td>" + r.baseline.meanSCR + "</td><td>" + r.conditioning.meanSCR + "</td><td>" + r.pgq.meanSCR + "</td>";
+            html += "<td>" + r.baseline.scrFreq + "</td><td>" + r.conditioning.scrFreq + "</td><td>" + r.pgq.scrFreq + "</td>";
+            html += "<td>" + r.baseline.totalSCR + "</td><td>" + r.conditioning.totalSCR + "</td><td>" + r.pgq.totalSCR + "</td>";
+            html += "<td>" + r.baseline.sclSlope + "</td><td>" + r.conditioning.sclSlope + "</td><td>" + r.pgq.sclSlope + "</td>";
+            html += "<td>" + r.baseline.nsSCL + "</td><td>" + r.conditioning.nsSCL + "</td><td>" + r.pgq.nsSCL + "</td>";
+            html += "<td>" + r.baseline.sclStd + "</td><td>" + r.conditioning.sclStd + "</td><td>" + r.pgq.sclStd + "</td>";
+            html += "<td>" + r.baseline.scrStd + "</td><td>" + r.conditioning.scrStd + "</td><td>" + r.pgq.scrStd + "</td>";
+            html += "</tr>";
+        }
+
+        html += "</tbody></table>";
+        container.innerHTML = html;
+    }
+
+    // ---------------- CSV DOWNLOAD ---------
+    function downloadCSV() {
+        if (!results || results.length === 0) return;
+
+        var header = [
+            "id","NAME",
+            "Mean SCL BASE","Mean SCL COND","Mean SCL PGQ",
+            "Mean SCR BASE","Mean SCR COND","Mean SCR PGQ",
+            "SCR Freq BASE","SCR Freq COND","SCR Freq PGQ",
+            "Total SCR BASE","Total SCR COND","Total SCR PGQ",
+            "SCL Slope BASE","SCL Slope COND","SCL Slope PGQ",
+            "NS-SCL BASE","NS-SCL COND","NS-SCL PGQ",
+            "SCL Std BASE","SCL Std COND","SCL Std PGQ",
+            "SCR Std BASE","SCR Std COND","SCR Std PGQ"
+        ];
+
+        var lines = [];
+        lines.push(header.join(","));
+
+        for (var i = 0; i < results.length; i++) {
+            var r = results[i];
+            var row = [
+                r.id, r.name,
+                r.baseline.meanSCL, r.conditioning.meanSCL, r.pgq.meanSCL,
+                r.baseline.meanSCR, r.conditioning.meanSCR, r.pgq.meanSCR,
+                r.baseline.scrFreq, r.conditioning.scrFreq, r.pgq.scrFreq,
+                r.baseline.totalSCR, r.conditioning.totalSCR, r.pgq.totalSCR,
+                r.baseline.sclSlope, r.conditioning.sclSlope, r.pgq.sclSlope,
+                r.baseline.nsSCL, r.conditioning.nsSCL, r.pgq.nsSCL,
+                r.baseline.sclStd, r.conditioning.sclStd, r.pgq.sclStd,
+                r.baseline.scrStd, r.conditioning.scrStd, r.pgq.scrStd
+            ];
+            lines.push(row.join(","));
+        }
+
+        var csv = lines.join("\n");
+        var blob = new Blob([csv], { type: "text/csv" });
+        var link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "EDA_MASTER_SHEET.csv";
+        link.click();
+    }
 </script>
+</body>
+</html>
